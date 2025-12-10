@@ -1,13 +1,31 @@
-def call(String namespace, String image) {
+def call(Map config = [:]) {
 
-    echo "🚀 Deploying Application to K8s Namespace: ${namespace}"
-    echo "📌 Using Image: ${image}"
+    // Read values from the map
+    def image = config.image
+    def namespace = config.namespace ?: "dev"
+    def kubeCredId = config.kubeconfigCredentialId ?: "k8s-config"
 
-    sh """
-        kubectl --kubeconfig=/var/lib/jenkins/kube/config set image deployment/k8s-app k8s-container=${image} -n ${namespace}
-        kubectl --kubeconfig=/var/lib/jenkins/kube/config rollout restart deployment k8s-app -n ${namespace}
-        kubectl --kubeconfig=/var/lib/jenkins/kube/config rollout status deployment k8s-app -n ${namespace}
-    """
+    if (!image) {
+        error "k8sDeploy: 'image' parameter is required"
+    }
 
-    echo "🎉 Deployment Completed Successfully in → ${namespace}"
+    echo "🚀 Deploying image: ${image} to namespace: ${namespace}"
+    echo "🌐 Using kubeconfig credential: ${kubeCredId}"
+
+    withCredentials([file(credentialsId: kubeCredId, variable: 'KCFG')]) {
+        sh """
+            # Prepare kubeconfig path
+            mkdir -p /var/lib/jenkins/kube
+            cp \$KCFG /var/lib/jenkins/kube/config
+            chmod 600 /var/lib/jenkins/kube/config
+
+            # Replace IMAGE placeholder in deployment.yaml
+            sed -i 's|IMAGE|${image}|g' k8s/deployment.yaml
+
+            # Apply to Kubernetes
+            kubectl --kubeconfig=/var/lib/jenkins/kube/config apply -f k8s/deployment.yaml -n ${namespace}
+            kubectl --kubeconfig=/var/lib/jenkins/kube/config get pods -n ${namespace}
+        """
+    }
 }
+
